@@ -3,9 +3,8 @@ import pool from "../config/db";
 import bcrypt from "bcryptjs";
 import { User } from "../types";
 import jwt from "jsonwebtoken";
-import { emitWarning } from "process";
 import { sendOTPEmail } from "../services/emailServices";
-import { error } from "console";
+
 
 export const signup: RequestHandler = async (req, res) => {
   const { email, password, role } = req.body;
@@ -92,7 +91,7 @@ export const forgetPassword: RequestHandler = async (req, res) => {
     return;
   }
 
-  const otp = Math.floor(100000 + Math.random() * 90000).toString();
+  const otp = Math.floor(1000 + Math.random() * 9000).toString();
   const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 1 day
 
   otpStore[email] = { otp, expiresAt, verified: false };
@@ -104,6 +103,12 @@ export const forgetPassword: RequestHandler = async (req, res) => {
 
 export const verifyOtp: RequestHandler = async (req, res) => {
   const { email, otp } = req.body;
+
+  if (!otp || typeof otp !== "string" || otp.length !== 4) {
+    res.status(400).json({ message: "Please enter a 4-digit OTP." });
+    return;
+  }
+
   const storedOtp = otpStore[email];
 
   if (!storedOtp || storedOtp.otp !== otp || storedOtp.expiresAt < Date.now()) {

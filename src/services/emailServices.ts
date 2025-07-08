@@ -9,14 +9,14 @@ export const sendOTPEmail = async (to: string, otp: string): Promise<void> => {
       user: process.env.SMTP_USER,
       pass: process.env.SMTP_PASS,
     },
-    secure: false, // or true for port 465
+    secure: false, 
   });
 
   const mailOptions = {
     from: `"Tray App" <${process.env.EMAIL_USER}>`,
     to,
     subject: 'Your OTP Code',
-    text: `Your OTP code is: ${otp}. It will expire in 5 minutes.`,
+    text: `Your OTP code is: ${otp}. It will expire in 1 day.`,
   };
 
   await transporter.sendMail(mailOptions);
