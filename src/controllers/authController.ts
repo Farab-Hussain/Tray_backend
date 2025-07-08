@@ -1,4 +1,4 @@
-import { Request, Response } from "express";
+import { Request, Response, RequestHandler } from "express";
 import pool from "../config/db";
 import bcrypt from "bcryptjs";
 import { User } from "../types";
@@ -7,15 +7,17 @@ import { emitWarning } from "process";
 import { sendOTPEmail } from "../services/emailServices";
 import { error } from "console";
 
-export const signup = async (req: Request, res: Response) => {
+export const signup: RequestHandler = async (req, res) => {
   const { email, password, role } = req.body;
   try {
     const userExists = await pool.query(
       "SELECT * FROM users WHERE email = $1",
       [email]
     );
-    if (userExists.rows.length > 0)
-      return res.status(400).json({ message: "User already exists" });
+    if (userExists.rows.length > 0) {
+      res.status(400).json({ message: "User already exists" });
+      return;
+    }
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
@@ -44,7 +46,7 @@ export const signup = async (req: Request, res: Response) => {
   }
 };
 
-export const login = async (req: Request, res: Response) => {
+export const login: RequestHandler = async (req, res) => {
   const { email, password } = req.body;
 
   try {
@@ -52,10 +54,16 @@ export const login = async (req: Request, res: Response) => {
       email,
     ]);
     const user: User = result.rows[0];
-    if (!user) return res.status(400).json({ msg: "User not found" });
+    if (!user) {
+      res.status(400).json({ msg: "User not found" });
+      return;
+    }
 
     const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) return res.status(400).json({ msg: "Invalid credentials" });
+    if (!isMatch) {
+      res.status(400).json({ msg: "Invalid credentials" });
+      return;
+    }
 
     const token = jwt.sign(
       { id: user.id, role: user.role },
@@ -69,50 +77,60 @@ export const login = async (req: Request, res: Response) => {
   }
 };
 
-const otpStore: Record<string, { otp: string; expiresAt: number }> = {};
+const otpStore: Record<string, { otp: string; expiresAt: number; verified: boolean }> = {};
 
-export const forgetPassword = async (req: Request, res: Response) => {
+export const forgetPassword: RequestHandler = async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ message: "Email is required" });
+  if (!email) {
+    res.status(400).json({ message: "Email is required" });
+    return;
+  }
 
-  const user = pool.query("SELECT * FROM users WHERE email = $1", [email]);
-  if (!user) return res.status(400).json({ message: "User not found" });
+  const user = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+  if (!user.rows.length) {
+    res.status(400).json({ message: "User not found" });
+    return;
+  }
 
   const otp = Math.floor(100000 + Math.random() * 90000).toString();
-  const expiresAt = Date.now() + 15 * 60 * 1000;
+  const expiresAt = Date.now() + 24 * 60 * 60 * 1000; // 1 day
 
-  otpStore[email] = { otp, expiresAt };
+  otpStore[email] = { otp, expiresAt, verified: false };
 
   await sendOTPEmail(email, otp); // You implement this
 
-  return res.json({ message: "OTP sent to your email" });
+  res.json({ message: "OTP sent to your email" });
 };
 
-export const verifyOtp = async (req: Request, res: Response) => {
+export const verifyOtp: RequestHandler = async (req, res) => {
   const { email, otp } = req.body;
   const storedOtp = otpStore[email];
 
   if (!storedOtp || storedOtp.otp !== otp || storedOtp.expiresAt < Date.now()) {
-    return res.status(400).json({ message: "Invalid or expired OTP" });
+    res.status(400).json({ message: "Invalid or expired OTP" });
+    return;
   }
 
-  delete otpStore[email];
+  otpStore[email].verified = true;
 
-  return res.json({ message: "OTP verified successfully" });
+  res.json({ message: "OTP verified successfully" });
 };
 
-export const resetPassword = async (req:Request , res:Response) => {
-  const { otp, email , newPassword} = req.body;
+export const resetPassword: RequestHandler = async (req, res) => {
+  const { email, otp, newPassword } = req.body;
   const record = otpStore[email];
 
-  if (!record || record.otp !== otp || Date.now() > record.expiresAt) {
-    return res.status(400).json({error: 'Invalid or expireOtp'})
+  if (!record || record.otp !== otp || Date.now() > record.expiresAt || !record.verified) {
+    res.status(400).json({ error: "Invalid, expired, or unverified OTP" });
+    return;
   }
 
   const hashedPassword = await bcrypt.hash(newPassword, 10);
-  await pool.query('UPDATE users SET password = $1 WHERE email = $2', [hashedPassword, email]);
+  await pool.query("UPDATE users SET password = $1 WHERE email = $2", [
+    hashedPassword,
+    email,
+  ]);
 
   delete otpStore[email];
-  return res.json({message: 'Password reset successfully'})
-
-}
+  res.json({ message: "Password reset successfully" });
+};
